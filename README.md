@@ -15,7 +15,12 @@ ceiling.
 ## Versions tested
 
 - Bun 1.3.13 on Linux (amd64)
+- Container image: `oven/bun:1-debian` (the official Bun image, Debian base)
 - Should reproduce on any 1.3.x; pre-1.3 not validated
+
+The harness was executed directly inside an `oven/bun:1-debian` container, so
+the numbers below reflect Bun's stock build of mimalloc with no host-side
+glibc / jemalloc interaction.
 
 ## Run it
 
