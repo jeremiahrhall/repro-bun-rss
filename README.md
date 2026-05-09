@@ -16,6 +16,8 @@ ceiling.
 
 - Bun 1.3.13 on Linux (amd64)
 - Container image: `oven/bun:1-debian` (the official Bun image, Debian base)
+- Also reproduced on Bun **1.3.14-canary.1+6d0d86b71** (Linux amd64, Ubuntu
+  24.04 host, no container) — see [Canary](#canary-1314-canary1) below
 - Should reproduce on any 1.3.x; pre-1.3 not validated
 
 The harness was executed directly inside an `oven/bun:1-debian` container, so
@@ -90,6 +92,92 @@ These do **not** change the curve in this repro:
 
 The `run-rss-scenarios.sh` script runs all four (baseline + the three
 above) so you can see them line up.
+
+## Canary (1.3.14-canary.1)
+
+Re-ran the same `./run-rss-scenarios.sh` sweep against
+`bun upgrade --canary` → `1.3.14-canary.1+6d0d86b71` on an Ubuntu 24.04
+amd64 host (no container; bun installed via the official install script).
+Raw logs in [`results-canary-1.3.14/`](./results-canary-1.3.14/).
+
+Final post-GC samples (last `post-gc` row before the 15s idle / after it):
+
+| scenario                 | rss before idle | rss after 15s idle |
+| ------------------------ | --------------: | -----------------: |
+| baseline                 |        467.2 MB |            42.1 MB |
+| `MIMALLOC_PURGE_DELAY=0` |        517.8 MB |            42.0 MB |
+| `MI_VERBOSE=1`           |        536.8 MB |            42.3 MB |
+| `MIMALLOC_VERBOSE=1`     |        472.2 MB |            42.1 MB |
+
+JSC heap capacity at every `post-gc` row is ~1 MB, so `overhead` ≈ `rss`.
+Same shape as 1.3.13: `Bun.gc(true) + Bun.shrink()` returns the JSC heap to
+near zero, RSS stays at 467–537 MB until the mimalloc purge timer fires
+during the trailing idle, then collapses to ~42 MB.
+
+### What changed on canary: `MIMALLOC_*` vars ARE honored now
+
+The 1.3.13 negative finding ("standard `MIMALLOC_*` environment variables
+are not honored") **does not hold** on `1.3.14-canary.1+6d0d86b71`. The
+`MIMALLOC_VERBOSE=1` run dumps the full options table at startup, including
+the in-tree mimalloc version:
+
+```
+mimalloc: process init: 0x7F95018AA200
+v3.3.1, release (built on May  8 2026, 20:47:24)
+option 'verbose': 1
+option 'purge_delay': 1000
+option 'arena_eager_commit': 2
+option 'purge_decommits': 1
+option 'arena_purge_mult': 1
+option 'deprecated_purge_extend_delay': 1
+option 'arena_reserve': 1048576 KiB
+…
+mimalloc: reserved 1048576 KiB memory
+```
+
+Cross-checking with `MIMALLOC_VERBOSE=1 MIMALLOC_PURGE_DELAY=0` shows
+`option 'purge_delay': 0` in the dump, confirming the env var is parsed
+and applied — not just printed. The bundled mimalloc is **v3.3.1** (the
+1.3.13 build was on the older series; v3.x renamed several options, hence
+the `deprecated_*` rows).
+
+### Why the curve still doesn't budge
+
+Even with `purge_delay=0`, post-GC RSS sits at 516.8 MB. The mechanism is
+still:
+
+1. `Bun.gc(true)` → `Global.mimalloc_cleanup(false)` → `mi_collect(false)`.
+   The `false` argument is the non-forced variant — it consolidates free
+   pages but does not call `madvise(MADV_DONTNEED)`. `purge_delay` only
+   gates mimalloc's *own* timer; it does not turn `mi_collect(false)` into
+   `mi_collect(true)`.
+2. mimalloc's per-segment / per-arena purge happens when a segment becomes
+   fully empty AND the delay has elapsed. Under sustained churn, segments
+   are reused before they stay empty long enough, so the timer rarely
+   fires mid-loop. The 15 s trailing idle is what finally lets segments
+   drain and the purge to run — `purge_delay=0` just means "0 ms wait
+   *after* it becomes purgeable," not "purge proactively now."
+3. Setting `arena_purge_mult=0` alongside `purge_delay=0` was tested in
+   addition to the four logged scenarios — both options show up in the
+   verbose dump as applied, but post-GC RSS still sits at 494–525 MB and
+   only collapses after the 15 s idle. So the gating really is in
+   `mi_collect(false)` itself, not in the timer math; no `MIMALLOC_*`
+   tuning that's reachable through env vars rescues this case. Raw log:
+   [`results-canary-1.3.14/arena-purge-mult-0.log`](./results-canary-1.3.14/arena-purge-mult-0.log).
+
+So the fix shape from the 1.3.13 write-up still applies, but the framing
+needs an update: it's no longer "wire env vars through" — that's already
+done as of canary `6d0d86b71`. The remaining gap is **(1)** passing
+`force=true` from `Bun.gc(true)` down to `mi_collect`, and **(2)** picking
+mimalloc v3 defaults (or compile-time options in
+[scripts/build/deps/mimalloc.ts](https://github.com/oven-sh/bun/blob/main/scripts/build/deps/mimalloc.ts))
+that don't require the user to know about `arena_purge_mult` /
+`MI_OPTION_*` to get bounded RSS.
+
+Diff range from 1.3.13 to the canary tested here:
+[`bf2e2cecf...6d0d86b71`](https://github.com/oven-sh/bun/compare/bf2e2cecf...6d0d86b71).
+1.3.13 was not re-run in this pass, so the original "env vars not honored"
+finding is reported as-was for that version.
 
 ## Why the metric definitions matter
 
