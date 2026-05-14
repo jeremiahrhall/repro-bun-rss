@@ -1,0 +1,65 @@
+mimalloc: process init: 0x7FD4DBAB0300
+v3.3.1, release (built on May 14 2026, 17:34:25)
+option 'show_errors': 0 
+option 'show_stats': 0 
+option 'verbose': 1 
+option 'deprecated_eager_commit': 1 
+option 'arena_eager_commit': 2 
+option 'purge_decommits': 1 
+option 'allow_large_os_pages': 0 
+option 'reserve_huge_os_pages': 0 
+option 'reserve_huge_os_pages_at': -1 
+option 'reserve_os_memory': 0 KiB
+option 'deprecated_segment_cache': 0 
+option 'deprecated_page_reset': 0 
+option 'deprecated_abandoned_page_purge': 0 
+option 'deprecated_segment_reset': 0 
+option 'deprecated_eager_commit_delay': 1 
+option 'purge_delay': 1000 
+option 'use_numa_nodes': 0 
+option 'disallow_os_alloc': 0 
+option 'os_tag': 100 
+option 'max_errors': 32 
+option 'max_warnings': 32 
+option 'deprecated_max_segment_reclaim': 10 
+option 'destroy_on_exit': 0 
+option 'arena_reserve': 1048576 KiB
+option 'arena_purge_mult': 1 
+option 'deprecated_purge_extend_delay': 1 
+option 'disallow_arena_alloc': 0 
+option 'retry_on_oom': 400 
+option 'visit_abandoned': 0 
+option 'guarded_min': 0 
+option 'guarded_max': 1073741824 
+option 'guarded_precise': 0 
+option 'guarded_sample_rate': 0 
+option 'guarded_sample_seed': 0 
+option 'generic_collect': 10000 
+option 'page_reclaim_on_free': 0 
+option 'page_full_retain': 2 
+option 'page_max_candidates': 4 
+option 'max_vabits': 0 
+option 'pagemap_commit': 0 
+option 'page_commit_on_demand': 0 
+option 'page_max_reclaim': -1 
+option 'page_cross_thread_max_reclaim': 32 
+option 'allow_thp': 0 
+option 'minimal_purge_size': 0 KiB
+option 'arena_max_object_size': 2097152 KiB
+debug level : 0
+secure level: 0
+mem tracking: none
+mimalloc: reserved 1048576 KiB memory
+[rss-repro] bun=1.3.14 pid=4751 iters=1500 bytes=4000000 hold=8 sample-every=250 gc-every=500
+[rss-repro] env: MIMALLOC_VERBOSE=1 MIMALLOC_PURGE_DELAY= MI_VERBOSE=
+t=     1ms r=    0    churn rss=  31.5MB jsc.cap=   0.7MB jsc.size=   0.2MB extra=    0MB ab=    0MB overhead=  30.9MB
+t=   785ms r=  250    churn rss= 511.8MB jsc.cap= 200.1MB jsc.size= 125.6MB extra= 87.1MB ab=    0MB overhead= 224.6MB
+t=  1408ms r=  500    churn rss= 514.9MB jsc.cap= 186.2MB jsc.size= 122.2MB extra=   85MB ab=    0MB overhead= 243.7MB
+t=  1431ms r=  500  post-gc rss= 509.3MB jsc.cap=     1MB jsc.size=   0.3MB extra=  0.1MB ab=    0MB overhead= 508.2MB
+t=  2089ms r=  750    churn rss= 510.7MB jsc.cap=  92.7MB jsc.size=  50.8MB extra= 35.3MB ab=    0MB overhead= 382.8MB
+t=  2711ms r= 1000    churn rss= 501.4MB jsc.cap= 153.6MB jsc.size= 117.2MB extra= 81.5MB ab=    0MB overhead= 266.3MB
+t=  2735ms r= 1000  post-gc rss= 500.6MB jsc.cap=     1MB jsc.size=   0.3MB extra=  0.1MB ab=    0MB overhead= 499.6MB
+t=  3402ms r= 1250    churn rss= 528.1MB jsc.cap= 180.7MB jsc.size= 117.7MB extra= 81.9MB ab=    0MB overhead= 265.4MB
+t=  4082ms r= 1500    churn rss= 479.5MB jsc.cap=   116MB jsc.size=  55.7MB extra= 38.7MB ab=    0MB overhead= 324.8MB
+t=  4111ms r= 1500  post-gc rss= 479.7MB jsc.cap=     1MB jsc.size=   0.3MB extra=  0.1MB ab=    0MB overhead= 478.6MB
+t= 19115ms r= 1500  post-gc rss=  40.6MB jsc.cap=   0.6MB jsc.size=   0.2MB extra=    0MB ab=    0MB overhead=    40MB
