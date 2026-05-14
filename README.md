@@ -18,6 +18,9 @@ ceiling.
 - Container image: `oven/bun:1-debian` (the official Bun image, Debian base)
 - Also reproduced on Bun **1.3.14-canary.1+6d0d86b71** (Linux amd64, Ubuntu
   24.04 host, no container) — see [Canary](#canary-1314-canary1) below
+- Also reproduced on Bun **1.3.14-canary.1+63035b3e3** — the Rust rewrite
+  ([PR #30412](https://github.com/oven-sh/bun/pull/30412)) — see
+  [Rust rewrite canary](#rust-rewrite-canary-1314-canary163035b3e3) below
 - Should reproduce on any 1.3.x; pre-1.3 not validated
 
 The harness was executed directly inside an `oven/bun:1-debian` container, so
@@ -179,6 +182,78 @@ Diff range from 1.3.13 to the canary tested here:
 1.3.13 was not re-run in this pass, so the original "env vars not honored"
 finding is reported as-was for that version.
 
+## Rust rewrite canary (1.3.14-canary.1+63035b3e3)
+
+On 2026-05-14 Bun merged [PR #30412 "Rewrite Bun in Rust"](https://github.com/oven-sh/bun/pull/30412)
+(commit `23427db`, +1,009,257 / −4,024, 2,188 files). The canary picked
+up by `bun upgrade --canary` after the merge is `1.3.14-canary.1+63035b3e3`,
+which is 9 commits ahead of the merge point (3 of them post-rewrite
+cleanup PRs: #30708, #30710, #30707, #30715). Re-ran the same
+`./run-rss-scenarios.sh` sweep on the same Ubuntu 24.04 amd64 host.
+Raw logs in [`results-rust-rewrite/`](./results-rust-rewrite/).
+
+| scenario                 | rss before idle | rss after 15s idle |
+| ------------------------ | --------------: | -----------------: |
+| baseline                 |        493.0 MB |            40.6 MB |
+| `MIMALLOC_PURGE_DELAY=0` |        467.3 MB |            40.4 MB |
+| `MI_VERBOSE=1`           |        461.6 MB |            40.7 MB |
+| `MIMALLOC_VERBOSE=1`     |        479.7 MB |            40.6 MB |
+| `purge_delay=0 + arena_purge_mult=0` | 487.6 MB |        40.6 MB |
+
+**Curve is identical.** Same JSC heap ≈ 1 MB at every `post-gc` row, RSS
+overhead 461–509 MB, collapse to ~40 MB only after the 15 s trailing
+idle. The mimalloc options dump shows v3.3.1 again, now timestamped
+`built on May 14 2026, 17:34:25` — same allocator, freshly rebuilt by
+the Rust toolchain.
+
+### Why it didn't change — the bug was faithfully ported
+
+`Global.zig::mimalloc_cleanup` became
+[`Global.rs::mimalloc_cleanup`](https://github.com/oven-sh/bun/blob/63035b3e3/src/bun_core/Global.rs)
+and was *improved* in one way: the literal `false` in the Zig version is
+gone, the function now takes a `force` parameter and forwards it to
+`mi_collect`:
+
+```rust
+#[inline]
+pub fn mimalloc_cleanup(force: bool) {
+    if USE_MIMALLOC {
+        bun_alloc::mimalloc::mi_collect(force);
+    }
+}
+```
+
+But the *caller* — [`VirtualMachine.rs::garbage_collect`](https://github.com/oven-sh/bun/blob/63035b3e3/src/jsc/VirtualMachine.rs)
+— still hardcodes `false`, identical to the Zig original. The `sync`
+parameter is forwarded to JSC's `vm.run_gc(sync)` but not to mimalloc:
+
+```rust
+#[cold]
+pub fn garbage_collect(&self, sync: bool) -> usize {
+    bun_core::Global::mimalloc_cleanup(false);  // <-- still false
+    let vm = self.global().vm();
+    if sync {
+        return vm.run_gc(true);
+    }
+    vm.collect_async();
+    vm.heap_size()
+}
+```
+
+The same `mimalloc_cleanup(false)` call appears at the other two sites
+([`ThreadPool.rs:1422`](https://github.com/oven-sh/bun/blob/63035b3e3/src/threading/ThreadPool.rs)
+and [`test_command.rs:3083`](https://github.com/oven-sh/bun/blob/63035b3e3/src/runtime/cli/test_command.rs)).
+So the one-line fix from the "Possible fixes" section below is now a
+zero-line fix — the parameter is already there, it just needs to be
+`sync` instead of literal `false` at one call site.
+
+`Bun.shrink()` was ported too — [`BunObject.rs:1142`](https://github.com/oven-sh/bun/blob/63035b3e3/src/runtime/api/BunObject.rs)
+still only calls `global_object.vm().shrink_footprint()` (JSC-only),
+unchanged in semantics from the Zig version.
+
+Diff range from the prior canary tested here to this one:
+[`6d0d86b71...63035b3e3`](https://github.com/oven-sh/bun/compare/6d0d86b71...63035b3e3).
+
 ## Why the metric definitions matter
 
 `process.memoryUsage().rss` reads RSS from `/proc/self/stat` directly
@@ -211,15 +286,26 @@ That env var did **not** affect RSS in this single-process repro on Bun
 
 ## Possible fixes (notes for upstream)
 
-Both small upstream changes:
+Status after the Rust rewrite (canary `63035b3e3`):
 
-1. **Pass `force` through to mimalloc.** `Global.mimalloc_cleanup(force)` →
-   `mi_collect(force)`. Then `Bun.gc(true)` would actually request eager
-   purge.
-2. **Bake `MI_OPTION_PURGE_DELAY` (or expose it).** Either lower the
-   compile-time default in `scripts/build/deps/mimalloc.ts`, or wire
-   `MIMALLOC_*` envs to `mi_option_set_*` at startup so users can tune
-   without rebuilding Bun.
+1. **Pass `force` through to mimalloc.** Half-done. `mimalloc_cleanup`
+   already takes and forwards a `force: bool` parameter
+   ([`Global.rs`](https://github.com/oven-sh/bun/blob/63035b3e3/src/bun_core/Global.rs)),
+   but `VirtualMachine::garbage_collect`
+   ([`VirtualMachine.rs:1117`](https://github.com/oven-sh/bun/blob/63035b3e3/src/jsc/VirtualMachine.rs))
+   still passes a literal `false`. Changing that one literal to `sync`
+   (the function's existing parameter, set true when `Bun.gc(true)` is
+   called) would surface eager purge through the public API. Two
+   sibling call sites in `ThreadPool.rs` and `test_command.rs` would
+   benefit from the same change.
+2. **Env-var wiring is no longer the bottleneck.** As of the
+   1.3.14-canary builds, `MIMALLOC_*` vars *are* honored — the verbose
+   dump shows `option 'purge_delay': 0` etc. being applied. But none
+   of them rescue the curve, because the gate is in `mi_collect(false)`
+   itself, not the timer math. Lowering the compile-time `purge_delay`
+   default in `scripts/build/deps/mimalloc.ts` would still be a
+   defense-in-depth win for users running with `Bun.gc(false)` or no
+   explicit GC at all, but it doesn't fix the case in this repro.
 
 Either change would be testable against this repro: the post-GC RSS
 overhead should collapse instead of waiting for the timer.
