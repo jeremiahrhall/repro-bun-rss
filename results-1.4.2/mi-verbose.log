@@ -1,0 +1,13 @@
+[rss-repro] bun=1.4.2 pid=3079 iters=1500 bytes=4000000 hold=8 sample-every=250 gc-every=500
+[rss-repro] env: MIMALLOC_VERBOSE= MIMALLOC_PURGE_DELAY= MI_VERBOSE=1
+t=     2ms r=    0    churn rss=  15.8MB jsc.cap=   0.6MB jsc.size=   0.2MB extra=    0MB ab=    0MB overhead=  15.2MB
+t=   753ms r=  250    churn rss= 415.9MB jsc.cap= 207.8MB jsc.size= 160.1MB extra=118.6MB ab=    0MB overhead=  89.6MB
+t=  1378ms r=  500    churn rss=   403MB jsc.cap= 163.5MB jsc.size= 107.5MB extra= 80.5MB ab=    0MB overhead=   159MB
+t=  1398ms r=  500  post-gc rss= 400.1MB jsc.cap=   0.9MB jsc.size=   0.2MB extra=  0.1MB ab=    0MB overhead=   399MB
+t=  2118ms r=  750    churn rss= 361.1MB jsc.cap= 143.4MB jsc.size=  97.4MB extra= 72.8MB ab=    0MB overhead= 144.8MB
+t=  2866ms r= 1000    churn rss= 416.7MB jsc.cap= 201.1MB jsc.size= 152.3MB extra=113.3MB ab=    0MB overhead= 102.3MB
+t=  2887ms r= 1000  post-gc rss= 415.7MB jsc.cap=     1MB jsc.size=   0.2MB extra=  0.1MB ab=    0MB overhead= 414.6MB
+t=  3435ms r= 1250    churn rss= 302.2MB jsc.cap=   102MB jsc.size=  55.6MB extra= 41.9MB ab=    0MB overhead= 158.3MB
+t=  4038ms r= 1500    churn rss= 438.2MB jsc.cap=  98.1MB jsc.size=    52MB extra= 38.8MB ab=    0MB overhead= 301.3MB
+t=  4059ms r= 1500  post-gc rss= 438.2MB jsc.cap=     1MB jsc.size=   0.2MB extra=  0.1MB ab=    0MB overhead= 437.2MB
+t= 19063ms r= 1500  post-gc rss=  33.5MB jsc.cap=   0.6MB jsc.size=   0.2MB extra=    0MB ab=    0MB overhead=  32.9MB
