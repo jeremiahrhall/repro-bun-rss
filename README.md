@@ -21,7 +21,15 @@ ceiling.
 - Also reproduced on Bun **1.3.14-canary.1+63035b3e3** — the Rust rewrite
   ([PR #30412](https://github.com/oven-sh/bun/pull/30412)) — see
   [Rust rewrite canary](#rust-rewrite-canary-1314-canary163035b3e3) below
-- Should reproduce on any 1.3.x; pre-1.3 not validated
+- Also reproduced on Bun **1.4.2+744846f84** (first stable Rust-rewrite
+  release) on Ubuntu 24.04 amd64 — baseline still retains RSS until idle;
+  `MIMALLOC_PURGE_DELAY=0` now *does* collapse it. See
+  [1.4.2](#bun-142-stable-rust-rewrite) below
+- **Not reproduced** on Bun **1.4.3-canary.1+f5649a7ed** —
+  `Bun.gc(true)` now forces `mi_collect(true)` via
+  [PR #42428](https://github.com/oven-sh/bun/pull/42428). See
+  [1.4.3 canary](#bun-143-canary1f5649a7ed-fixed) below
+- Should reproduce on any 1.3.x and on 1.4.0–1.4.2; pre-1.3 not validated
 
 The harness was executed directly inside an `oven/bun:1-debian` container, so
 the numbers below reflect Bun's stock build of mimalloc with no host-side
@@ -254,6 +262,117 @@ unchanged in semantics from the Zig version.
 Diff range from the prior canary tested here to this one:
 [`6d0d86b71...63035b3e3`](https://github.com/oven-sh/bun/compare/6d0d86b71...63035b3e3).
 
+## Bun 1.4.2 (stable Rust rewrite)
+
+Re-ran the same sweep on **1.4.2+744846f84** (install script, Ubuntu 24.04
+amd64, no container). This is the first stable release of the Rust rewrite
+([Bun 1.4](https://bun.com/blog/bun-v1.4), [Bun in Rust](https://bun.com/blog/bun-in-rust)).
+Raw logs in [`results-1.4.2/`](./results-1.4.2/).
+
+| scenario                 | rss before idle | rss after 15s idle |
+| ------------------------ | --------------: | -----------------: |
+| baseline                 |        332.8 MB |            34.7 MB |
+| `MIMALLOC_PURGE_DELAY=0` |         42.2 MB |            33.7 MB |
+| `MI_VERBOSE=1`           |        438.2 MB |            33.5 MB |
+| `MIMALLOC_VERBOSE=1`     |        429.9 MB |            34.4 MB |
+| `purge_delay=0 + arena_purge_mult=0` | 43.9 MB |        34.0 MB |
+
+**Baseline is still the same bug.** At every `post-gc` checkpoint JSC heap
+capacity is ~1 MB, RSS is 212–372 MB, and the collapse to ~35 MB still
+waits on the 15 s idle. `VirtualMachine::garbage_collect` at
+[`744846f84`](https://github.com/oven-sh/bun/blob/744846f84/src/jsc/VirtualMachine.rs)
+still hardcodes `mimalloc_cleanup(false)` and there is no
+`garbage_collect_from_js` yet.
+
+Two things *did* change vs the 1.3.14 rust-rewrite canary:
+
+1. Bundled mimalloc is **v3.5.0** (was v3.3.1), `purge_delay` default
+   **100** (was 1000). Peak retained RSS is lower (~333 MB vs ~493 MB)
+   but the shape is unchanged: GC empties JSC, RSS stays until the
+   scavenger/purge timer fires.
+2. **`MIMALLOC_PURGE_DELAY=0` now actually rescues this repro.** Post-GC
+   RSS is 40–47 MB at every checkpoint — the previous "no env-var tuning
+   works" finding does **not** hold on 1.4.2. The verbose dump confirms
+   `option 'purge_delay': 0` is applied. Combined with mimalloc 3.5's
+   scavenger (`option 'scavenger': 1`), a zero delay is enough for
+   `mi_collect(false)` + per-free purge to decommit before the next
+   sample. `arena_purge_mult=0` is not required.
+
+So on 1.4.2 the workaround for this harness is `MIMALLOC_PURGE_DELAY=0`.
+The public `Bun.gc(true)` API still does not force a purge on its own,
+so default-config services that never set that env var still see the
+timer-gated RSS spike.
+
+## Bun 1.4.3-canary.1+f5649a7ed (fixed)
+
+`bun upgrade --canary` → **1.4.3-canary.1+f5649a7ed**. Same host, same
+harness. Raw logs in [`results-1.4.3-canary/`](./results-1.4.3-canary/).
+
+| scenario                 | rss before idle | rss after 15s idle |
+| ------------------------ | --------------: | -----------------: |
+| baseline                 |         43.4 MB |            34.7 MB |
+| `MIMALLOC_PURGE_DELAY=0` |         41.5 MB |            34.2 MB |
+| `MI_VERBOSE=1`           |         44.6 MB |            34.6 MB |
+| `MIMALLOC_VERBOSE=1`     |         44.8 MB |            34.2 MB |
+| `purge_delay=0 + arena_purge_mult=0` | 42.0 MB |        33.8 MB |
+
+**This repro is no longer reproducible on canary.** Every `post-gc` row
+drops RSS to ~43 MB immediately (JSC heap ~1 MB). The trailing 15 s idle
+only shaves another ~9 MB. Churn rows still peak ~350–400 MB, as expected
+— the live working set is real; the retained-after-GC gap is gone.
+
+mimalloc dump: **v3.5.2**, `purge_delay` still 100, `scavenger: 1`.
+
+### What fixed it
+
+[PR #42428](https://github.com/oven-sh/bun/pull/42428) (merge
+`24271499a0`, 2026-09-12) — *"Bun.gc(true) and gc() return what the
+collection freed to the OS before they return"*. That is the one-line
+fix from the notes below, landed as a dedicated JS entry point rather
+than mutating every `garbage_collect` caller:
+
+```rust
+#[cold]
+pub fn garbage_collect(&self, sync: bool) -> usize {
+    bun_core::Global::mimalloc_cleanup(false);  // internal / async path: unchanged
+    let vm = self.global().vm();
+    if sync {
+        return vm.run_gc(true);
+    }
+    vm.collect_async(false);
+    vm.heap_size()
+}
+
+/// `Bun.gc(force)` and `gc()`. Whoever asks for a synchronous collection
+/// reads the footprint next: what the collection freed goes back to the
+/// OS now, not whenever the allocator's purge delay has passed.
+pub fn garbage_collect_from_js(&self, sync: bool) -> usize {
+    let size = self.garbage_collect(sync);
+    if sync {
+        bun_core::Global::mimalloc_cleanup(true);  // <-- mi_collect(true) after JSC GC
+    }
+    size
+}
+```
+
+[`BunObject.rs`](https://github.com/oven-sh/bun/blob/f5649a7ed/src/runtime/api/BunObject.rs)
+and the `gc()` export now call `garbage_collect_from_js`. Runtime-driven
+GC (the GC controller, `--smol`) still uses `garbage_collect` and does
+**not** force a purge — so workloads that never call `Bun.gc(true)` /
+`global.gc()` still wait on mimalloc's delay. This harness does call
+`Bun.gc(true)`, so it is fixed.
+
+Follow-ups already on this canary (needed because a concurrent scavenger
+pass could drop the forced purge):
+
+- [#42571](https://github.com/oven-sh/bun/pull/42571) /
+  [oven-sh/mimalloc#38](https://github.com/oven-sh/mimalloc/pull/38) —
+  forced purge waits for an in-progress pass
+- mimalloc pin moved to v3.5.2 (`7d792a5`, `c8b9b58`)
+
+Diff range from 1.4.2 to this canary:
+[`744846f84...f5649a7ed`](https://github.com/oven-sh/bun/compare/744846f84...f5649a7ed).
+
 ## Why the metric definitions matter
 
 `process.memoryUsage().rss` reads RSS from `/proc/self/stat` directly
@@ -286,32 +405,31 @@ That env var did **not** affect RSS in this single-process repro on Bun
 
 ## Possible fixes (notes for upstream)
 
-Status after the Rust rewrite (canary `63035b3e3`):
+Status after 1.4.3-canary `f5649a7ed`:
 
-1. **Pass `force` through to mimalloc.** Half-done. `mimalloc_cleanup`
-   already takes and forwards a `force: bool` parameter
-   ([`Global.rs`](https://github.com/oven-sh/bun/blob/63035b3e3/src/bun_core/Global.rs)),
-   but `VirtualMachine::garbage_collect`
-   ([`VirtualMachine.rs:1117`](https://github.com/oven-sh/bun/blob/63035b3e3/src/jsc/VirtualMachine.rs))
-   still passes a literal `false`. Changing that one literal to `sync`
-   (the function's existing parameter, set true when `Bun.gc(true)` is
-   called) would surface eager purge through the public API. Two
-   sibling call sites in `ThreadPool.rs` and `test_command.rs` would
-   benefit from the same change.
-2. **Env-var wiring is no longer the bottleneck.** As of the
-   1.3.14-canary builds, `MIMALLOC_*` vars *are* honored — the verbose
-   dump shows `option 'purge_delay': 0` etc. being applied. But none
-   of them rescue the curve, because the gate is in `mi_collect(false)`
-   itself, not the timer math. Lowering the compile-time `purge_delay`
-   default in `scripts/build/deps/mimalloc.ts` would still be a
-   defense-in-depth win for users running with `Bun.gc(false)` or no
-   explicit GC at all, but it doesn't fix the case in this repro.
+1. **Pass `force` through to mimalloc from `Bun.gc(true)`.** Done.
+   [PR #42428](https://github.com/oven-sh/bun/pull/42428) added
+   `garbage_collect_from_js`, which calls `mimalloc_cleanup(true)`
+   after a synchronous JSC GC. This harness's post-GC RSS now
+   collapses immediately. Not yet in a stable release (1.4.2 still
+   has the old path).
+2. **Env-var workaround on 1.4.2.** As of mimalloc v3.5.0 in 1.4.2,
+   `MIMALLOC_PURGE_DELAY=0` *does* rescue this repro even without
+   `mi_collect(true)`. That was not true on 1.3.14 / mimalloc 3.3.1.
+   Runtime-driven GC (no explicit `Bun.gc(true)`) still depends on
+   this timer; 1.4.3-canary left that path on `mi_collect(false)`
+   by design.
 
-Either change would be testable against this repro: the post-GC RSS
-overhead should collapse instead of waiting for the timer.
+The remaining production gap is processes that never call
+`Bun.gc(true)` under continuous churn: they still wait on the
+scavenger. That is a different (weaker) claim than this repro.
 
 ## Files
 
 - [`rss-repro.ts`](./rss-repro.ts) — the repro harness, ~120 lines.
 - [`run-rss-scenarios.sh`](./run-rss-scenarios.sh) — runs all four env
   scenarios sequentially and prints a summary.
+- [`results-1.4.2/`](./results-1.4.2/) — 1.4.2+744846f84 sweep (still
+  reproduces on baseline).
+- [`results-1.4.3-canary/`](./results-1.4.3-canary/) — 1.4.3-canary.1+f5649a7ed
+  sweep (fixed).

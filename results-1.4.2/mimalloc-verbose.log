@@ -1,0 +1,73 @@
+mimalloc: process init: 0x7F4557630E80
+v3.5.0, release
+option 'show_errors': 0 
+option 'show_stats': 0 
+option 'verbose': 1 
+option 'deprecated_eager_commit': 1 
+option 'arena_eager_commit': 2 
+option 'purge_decommits': 1 
+option 'allow_large_os_pages': 0 
+option 'reserve_huge_os_pages': 0 
+option 'reserve_huge_os_pages_at': -1 
+option 'reserve_os_memory': 0 KiB
+option 'deprecated_segment_cache': 0 
+option 'deprecated_page_reset': 0 
+option 'deprecated_abandoned_page_purge': 0 
+option 'deprecated_segment_reset': 0 
+option 'deprecated_eager_commit_delay': 1 
+option 'purge_delay': 100 
+option 'use_numa_nodes': 0 
+option 'disallow_os_alloc': 0 
+option 'os_tag': 240 
+option 'max_errors': 32 
+option 'max_warnings': 32 
+option 'deprecated_max_segment_reclaim': 10 
+option 'destroy_on_exit': 0 
+option 'arena_reserve': 1048576 KiB
+option 'arena_purge_mult': 1 
+option 'deprecated_purge_extend_delay': 1 
+option 'disallow_arena_alloc': 0 
+option 'retry_on_oom': 400 
+option 'deprecated_visit_abandoned': 1 
+option 'guarded_min': 0 
+option 'guarded_max': 1073741824 
+option 'guarded_precise': 0 
+option 'guarded_sample_rate': 0 
+option 'guarded_sample_seed': 0 
+option 'generic_collect': 10000 
+option 'page_reclaim_on_free': 0 
+option 'page_full_retain': 2 
+option 'page_max_candidates': 4 
+option 'max_vabits': 0 
+option 'pagemap_commit': 0 
+option 'page_commit_on_demand': 0 
+option 'page_max_reclaim': -1 
+option 'page_cross_thread_max_reclaim': 32 
+option 'allow_thp': 0 
+option 'minimal_purge_size': 0 KiB
+option 'arena_max_object_size': 2097152 KiB
+option 'arena_is_numa_local': 0 
+option 'snapshot_on_exit': 0 
+option 'prof_sample_rate': 0 
+option 'scavenger': 1 
+option 'purge_holes': 1 
+option 'purge_holes_eager_zero': 0 
+option 'purge_holes_min_interval': 100 
+option 'purge_holes_full_every': 64 
+debug level : 0
+secure level: 0
+mem tracking: none
+mimalloc: reserved 1048576 KiB memory
+[rss-repro] bun=1.4.2 pid=3093 iters=1500 bytes=4000000 hold=8 sample-every=250 gc-every=500
+[rss-repro] env: MIMALLOC_VERBOSE=1 MIMALLOC_PURGE_DELAY= MI_VERBOSE=
+t=     2ms r=    0    churn rss=  15.6MB jsc.cap=   0.6MB jsc.size=   0.2MB extra=    0MB ab=    0MB overhead=    15MB
+t=   723ms r=  250    churn rss=   377MB jsc.cap= 152.6MB jsc.size= 106.4MB extra= 79.3MB ab=    0MB overhead= 145.2MB
+t=  1346ms r=  500    churn rss= 404.6MB jsc.cap= 196.4MB jsc.size=   160MB extra=119.7MB ab=    0MB overhead=  88.6MB
+t=  1367ms r=  500  post-gc rss= 348.9MB jsc.cap=     1MB jsc.size=   0.2MB extra=  0.1MB ab=    0MB overhead= 347.9MB
+t=  1919ms r=  750    churn rss= 372.2MB jsc.cap= 152.6MB jsc.size= 104.8MB extra= 77.9MB ab=    0MB overhead= 141.7MB
+t=  2473ms r= 1000    churn rss= 405.9MB jsc.cap=  96.8MB jsc.size=  50.7MB extra= 38.1MB ab=    0MB overhead= 270.9MB
+t=  2496ms r= 1000  post-gc rss=   300MB jsc.cap=     1MB jsc.size=   0.2MB extra=  0.1MB ab=    0MB overhead=   299MB
+t=  3062ms r= 1250    churn rss= 387.8MB jsc.cap= 142.8MB jsc.size= 109.3MB extra= 81.5MB ab=    0MB overhead= 163.5MB
+t=  3673ms r= 1500    churn rss= 429.9MB jsc.cap= 204.1MB jsc.size= 151.3MB extra=112.9MB ab=    0MB overhead=   113MB
+t=  3695ms r= 1500  post-gc rss= 429.9MB jsc.cap=     1MB jsc.size=   0.2MB extra=  0.1MB ab=    0MB overhead= 428.9MB
+t= 18699ms r= 1500  post-gc rss=  34.4MB jsc.cap=   0.6MB jsc.size=   0.2MB extra=    0MB ab=    0MB overhead=  33.8MB
